@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <title>视频翻译工具 · UI Kit</title>
+  <link rel="stylesheet" href="colors_and_type.css">
+  <style>
+    /* keyframes referenced by Primitives + Stepper */
+    @keyframes vt-pulse { 0%,100% { opacity:1; transform:scale(1);} 50%{ opacity:.5; transform:scale(1.4);} }
+    @keyframes vt-breathe { 0%,100% { box-shadow: 0 0 0 6px var(--accent-ring); } 50% { box-shadow: 0 0 0 10px rgba(230,106,61,0.18); } }
+    @keyframes vt-livedot { 0% { box-shadow: 0 0 0 0 rgba(255,166,121,0.55); } 100% { box-shadow: 0 0 0 8px rgba(255,166,121,0); } }
+    @keyframes vt-blink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
+    @keyframes vt-fade-in { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes vt-typing { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
+    .vt-caret { animation: vt-blink 1s steps(1) infinite; }
+    .vt-log-line { animation: vt-fade-in 220ms var(--ease-out); }
+    .vt-typing span { display: inline-block; width: 4px; height: 4px; border-radius: 999px; background: currentColor; margin: 0 1px; animation: vt-typing 1.1s ease-in-out infinite; }
+    .vt-typing span:nth-child(2) { animation-delay: 0.18s; }
+    .vt-typing span:nth-child(3) { animation-delay: 0.36s; }
+
+    body { background: var(--ink-0); }
+    .layout {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 28px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+      align-items: start;
+    }
+    .hero {
+      grid-column: 1 / -1;
+      display: flex; flex-direction: column; gap: 6px;
+      padding: 8px 0 4px;
+    }
+    .hero h1 {
+      font-family: var(--font-sans-cjk);
+      font-size: 36px; font-weight: 700;
+      color: var(--ink-900);
+      display: flex; align-items: center; gap: 12px;
+    }
+    .hero p { color: var(--ink-500); font-size: 15px; max-width: 60ch; }
+    @media (max-width: 760px) {
+      .layout { grid-template-columns: 1fr; }
+    }
+  </style>
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+
+<script type="text/babel" src="Primitives.jsx"></script>
+<script type="text/babel" src="Header.jsx"></script>
+<script type="text/babel" src="PipelineStepper.jsx"></script>
+<script type="text/babel" src="UploadPanel.jsx"></script>
+<script type="text/babel" src="LiveStatus.jsx"></script>
+<script type="text/babel" src="ReviewPanel.jsx"></script>
+<script type="text/babel" src="OutputPanel.jsx"></script>
+
+<div id="app"></div>
+
+<script type="text/babel">
+  const { useState, useEffect, useRef, useCallback } = React;
+
+  // ── 后端地址 ──────────────────────────────────────────────
+  const API = 'http://127.0.0.1:8000';
+
+  // 步骤名称 → activeIndex 映射（与后端 current_step 字段对应）
+  const STEP_INDEX = {
+    preprocess: 0, asr: 1, translate: 2,
+    tts: 3, lipsync: 4, assemble: 5,
+  };
+
+  function App() {
+    const [file, setFile]           = useState(null);   // { name, size, _raw: File }
+    const [activeIndex, setActiveIndex] = useState(-1);
+    const [confirmStep, setConfirmStep] = useState(-1); // 哪个步骤在等待确认
+    const [progress, setProgress]   = useState(0);
+    const [completed, setCompleted] = useState(false);
+    const [failed, setFailed]       = useState('');
+    const [taskId, setTaskId]       = useState('');
+    const [lang, setLang]           = useState('English');
+
+    // ── 人工确认面板状态 ─────────────────────────────────
+    // 每个面板独立存储：null = 未出现，{segments, confirmed} = 已出现
+    const [asrPanel,         setAsrPanel]         = useState(null);
+    const [translationPanel, setTranslationPanel] = useState(null);
+    const [reviewLoading,    setReviewLoading]    = useState(false);
+
+    const pollRef = useRef(null);
+
+    // ── 停止轮询 ──────────────────────────────────────────
+    const stopPolling = useCallback(() => {
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
+    }, []);
+
+    // ── 获取片段数据 ──────────────────────────────────────
+    async function fetchSegments(id) {
+      const res = await fetch(`${API}/tasks/${id}/segments`);
+      if (!res.ok) throw new Error('获取片段失败');
+      return await res.json();
+    }
+
+    // ── 轮询任务状态 ──────────────────────────────────────
+    const startPolling = useCallback((id) => {
+      stopPolling();
+      pollRef.current = setInterval(async () => {
+        try {
+          const res = await fetch(`${API}/tasks/${id}`);
+          if (!res.ok) return;
+          const data = await res.json();
+
+          setProgress(data.progress ?? 0);
+          if (data.current_step) {
+            setActiveIndex(STEP_INDEX[data.current_step] ?? 0);
+            setConfirmStep(-1);
+          }
+
+          if (data.status === 'waiting_asr_confirm') {
+            stopPolling();
+            setActiveIndex(-1);
+            setConfirmStep(1);
+            // 只在首次进入此状态时拉取片段（避免重复覆盖用户编辑）
+            setAsrPanel((prev) => {
+              if (prev) return prev;   // 已存在则不覆盖
+              fetchSegments(id).then((segs) =>
+                setAsrPanel({ segments: segs.segments, confirmed: false })
+              );
+              return prev;
+            });
+          } else if (data.status === 'waiting_translation_confirm') {
+            stopPolling();
+            setActiveIndex(-1);
+            setConfirmStep(2);
+            setTranslationPanel((prev) => {
+              if (prev) return prev;
+              fetchSegments(id).then((segs) =>
+                setTranslationPanel({ segments: segs.segments, confirmed: false })
+              );
+              return prev;
+            });
+          } else if (data.status === 'completed') {
+            setCompleted(true);
+            setActiveIndex(-1);
+            setConfirmStep(-1);
+            setProgress(100);
+            stopPolling();
+          } else if (data.status === 'failed') {
+            setFailed(data.error_message || '任务失败，请查看终端日志');
+            setActiveIndex(-1);
+            setConfirmStep(-1);
+            stopPolling();
+          }
+        } catch (e) {
+          console.error('轮询失败:', e);
+        }
+      }, 2000);
+    }, [stopPolling]);
+
+    // ── 确认 ASR ─────────────────────────────────────────
+    async function handleConfirmASR(editedSegs) {
+      setReviewLoading(true);
+      try {
+        const res = await fetch(`${API}/tasks/${taskId}/confirm/asr`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ segments: editedSegs }),
+        });
+        if (!res.ok) throw new Error('确认失败');
+        // 面板切换为只读常驻，不销毁
+        setAsrPanel((prev) => prev ? { ...prev, confirmed: true } : prev);
+        setConfirmStep(-1);
+        setActiveIndex(2);
+        startPolling(taskId);
+      } catch (e) {
+        setFailed(`ASR 确认失败: ${e.message}`);
+      } finally {
+        setReviewLoading(false);
+      }
+    }
+
+    // ── 确认翻译 ─────────────────────────────────────────
+    async function handleConfirmTranslation(editedSegs) {
+      setReviewLoading(true);
+      try {
+        const res = await fetch(`${API}/tasks/${taskId}/confirm/translation`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ segments: editedSegs }),
+        });
+        if (!res.ok) throw new Error('确认失败');
+        // 面板切换为只读常驻，不销毁
+        setTranslationPanel((prev) => prev ? { ...prev, confirmed: true } : prev);
+        setConfirmStep(-1);
+        setActiveIndex(3);
+        startPolling(taskId);
+      } catch (e) {
+        setFailed(`翻译确认失败: ${e.message}`);
+      } finally {
+        setReviewLoading(false);
+      }
+    }
+
+    // ── 提交翻译任务 ──────────────────────────────────────
+    async function run({ lang: chosenLang, lipsync = true }) {
+      if (!file?._raw) return;
+      stopPolling();
+      setCompleted(false);
+      setFailed('');
+      setActiveIndex(0);
+      setConfirmStep(-1);
+      setProgress(5);
+      setLang(chosenLang);
+      // 新任务开始时清空两个确认面板
+      setAsrPanel(null);
+      setTranslationPanel(null);
+
+      try {
+        const formData = new FormData();
+        formData.append('file', file._raw);
+        formData.append('target_language', chosenLang);
+        formData.append('lipsync', lipsync ? 'true' : 'false');
+
+        const res = await fetch(`${API}/tasks`, {
+          method: 'POST',
+          body: formData,
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || `HTTP ${res.status}`);
+        }
+        const data = await res.json();
+        setTaskId(data.task_id);
+        startPolling(data.task_id);
+      } catch (e) {
+        setFailed(`提交失败: ${e.message}（请确认后端已启动 python main.py）`);
+        setActiveIndex(-1);
+        setProgress(0);
+      }
+    }
+
+    useEffect(() => stopPolling, [stopPolling]);
+
+    const running = activeIndex >= 0 || (asrPanel && !asrPanel.confirmed) || (translationPanel && !translationPanel.confirmed);
+
+    return (
+      <>
+        <Header/>
+        <main className="layout">
+          <div className="hero">
+            <h1>🎬 视频翻译工具</h1>
+            <p>上传中文视频，自动翻译为目标语言 · 支持字幕 · 口型同步</p>
+          </div>
+
+          {failed && (
+            <div style={{
+              gridColumn: '1 / -1',
+              background: 'var(--danger-soft)', border: '1px solid #F5B9B5',
+              borderRadius: 'var(--radius-md)', padding: '12px 16px',
+              color: '#8B281D', fontSize: 13,
+            }}>
+              ❌ {failed}
+            </div>
+          )}
+
+          {/* ASR 确认面板（出现后常驻，确认后切只读）*/}
+          {asrPanel && (
+            <ReviewPanel
+              mode="asr"
+              segments={asrPanel.segments}
+              targetLanguage={lang}
+              confirmed={asrPanel.confirmed}
+              loading={reviewLoading}
+              onConfirm={handleConfirmASR}
+            />
+          )}
+
+          {/* 翻译确认面板（出现后常驻，确认后切只读）*/}
+          {translationPanel && (
+            <ReviewPanel
+              mode="translation"
+              segments={translationPanel.segments}
+              targetLanguage={lang}
+              confirmed={translationPanel.confirmed}
+              loading={reviewLoading}
+              onConfirm={handleConfirmTranslation}
+            />
+          )}
+
+          <UploadPanel onRun={run} running={running} file={file} setFile={setFile}/>
+          <OutputPanel
+            activeIndex={activeIndex}
+            confirmStep={confirmStep}
+            progress={progress}
+            completed={completed}
+            taskId={taskId}
+            file={file}
+            lang={lang}
+          />
+        </main>
+      </>
+    );
+  }
+
+  ReactDOM.createRoot(document.getElementById('app')).render(<App/>);
+</script>
+
+</body>
+</html>

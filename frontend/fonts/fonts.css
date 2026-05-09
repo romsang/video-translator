@@ -1,0 +1,6 @@
+/* Web fonts — loaded from Google Fonts CDN.
+   We do not self-host TTF/WOFF files in this project (no team-supplied
+   font files were provided). Substitute self-hosted versions here if
+   the team ships them later. */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');

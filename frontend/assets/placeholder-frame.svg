@@ -1,0 +1,27 @@
+
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360" width="640" height="360">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#FCEFE5"></stop>
+      <stop offset="55%" stop-color="#E6C2A8"></stop>
+      <stop offset="100%" stop-color="#7A4F38"></stop>
+    </linearGradient>
+    <radialGradient id="vignette" cx="50%" cy="55%" r="65%">
+      <stop offset="60%" stop-color="rgba(0,0,0,0)"></stop>
+      <stop offset="100%" stop-color="rgba(22,18,13,0.45)"></stop>
+    </radialGradient>
+    <pattern id="grain" width="3" height="3" patternUnits="userSpaceOnUse">
+      <circle cx="1" cy="1" r="0.4" fill="rgba(22,18,13,0.18)"></circle>
+    </pattern>
+  </defs>
+  <rect width="640" height="360" fill="url(#bg)"></rect>
+  
+  <ellipse cx="320" cy="320" rx="220" ry="40" fill="rgba(22,18,13,0.22)"></ellipse>
+  <path d="M 220 320 Q 250 220 320 200 Q 390 220 420 320 Z" fill="rgba(22,18,13,0.55)"></path>
+  <circle cx="320" cy="180" r="40" fill="rgba(22,18,13,0.6)"></circle>
+  <rect width="640" height="360" fill="url(#vignette)"></rect>
+  <rect width="640" height="360" fill="url(#grain)" opacity="0.6"></rect>
+  
+  <rect x="0" y="0" width="640" height="36" fill="#16120D"></rect>
+  <rect x="0" y="324" width="640" height="36" fill="#16120D"></rect>
+</svg>

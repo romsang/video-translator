@@ -1,0 +1,59 @@
+# ════════════════════════════════════════════════════════════
+# config.example.yaml — 配置文件模板
+# 复制此文件并重命名为 config.yaml，然后填入你的 API Keys
+# 注意：config.yaml 已被 .gitignore 忽略，不会上传到 GitHub
+# ════════════════════════════════════════════════════════════
+
+# ── API Keys ─────────────────────────────────────────────────
+api_keys:
+  dashscope: "YOUR_DASHSCOPE_API_KEY"   # 阿里云 DashScope（Qwen3-ASR-Flash）
+  openai: "YOUR_OPENAI_API_KEY"         # OpenAI（翻译 + TTS）
+  syncso: "YOUR_SYNCSO_API_KEY"         # Sync.so（口型同步）
+
+# ── 模型配置 ──────────────────────────────────────────────────
+models:
+  asr: "qwen3-asr-flash"                # 阿里云语音识别模型
+  translate: "gpt-4o"                   # 翻译模型（可换 o3 等）
+  tts: "tts-1-hd"                       # OpenAI TTS 模型（最高质量）
+  tts_voice: "alloy"                    # TTS 声音（alloy/echo/fable/onyx/nova/shimmer）
+
+# ── 翻译配置 ──────────────────────────────────────────────────
+translation:
+  target_language: "English"            # 目标语言（中文填"中文"也可）
+  # 各语言平均语速（词/秒），用于计算约束字数
+  speaking_rates:
+    English: 2.5
+    Japanese: 6.5
+    Korean: 4.5
+    Spanish: 3.0
+    French: 2.8
+    German: 2.5
+  max_retries: 2                        # 翻译超长时最多重试次数
+
+# ── 时长对齐配置 ──────────────────────────────────────────────
+timing:
+  # 第二阶段：TTS 音频加速上限（超过此比例进入第三阶段）
+  max_audio_speedup_ratio: 1.20         # 最多加速 20%
+  # 第三阶段：视频拉伸上限
+  max_video_stretch_ratio: 1.30         # 最多拉伸 30%
+  # 超过此比例触发重新翻译
+  retranslate_threshold: 1.50
+
+# ── 口型同步配置 ──────────────────────────────────────────────
+lipsync:
+  enabled: true                         # 是否启用口型同步
+  face_detection_confidence: 0.7        # 人脸检测置信度阈值（0~1）
+  syncso_model: "sync-1.6.0"           # Sync.so 使用的模型版本
+
+# ── 文件路径配置 ──────────────────────────────────────────────
+paths:
+  workspace: "./workspace"              # 中间文件临时目录
+  outputs: "./outputs"                  # 最终输出目录
+  # FFmpeg 可执行文件路径（macOS 用 brew install ffmpeg 后通常在此）
+  ffmpeg: "ffmpeg"
+  ffprobe: "ffprobe"
+
+# ── 其他配置 ──────────────────────────────────────────────────
+misc:
+  log_level: "INFO"                     # 日志级别（DEBUG/INFO/WARNING）
+  cleanup_workspace: true               # 完成后清理中间文件
