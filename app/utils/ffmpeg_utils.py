@@ -76,18 +76,25 @@ async def extract_audio_segment(
 async def extract_video_segment(
     video_path: str, output_path: str,
     start: float, end: float,
-    config: dict
+    config: dict,
+    mute_audio: bool = False,
 ) -> None:
     """
     截取视频片段（含画面，用于口型同步处理）。
     使用 -avoid_negative_ts 保证时间戳正确。
+    mute_audio=True 时将音频静音（用于话间间隙，避免背景音与配音音轨不匹配）。
     """
+    audio_args = (
+        ["-af", "volume=0", "-c:a", "aac", "-ar", "48000", "-ac", "2"]
+        if mute_audio else
+        ["-c:a", "aac"]
+    )
     await run_ffmpeg([
         "-i", video_path,
         "-ss", str(start),
         "-to", str(end),
-        "-c:v", "libx264",   # H.264 编码
-        "-c:a", "aac",
+        "-c:v", "libx264",
+        *audio_args,
         "-avoid_negative_ts", "make_zero",
         output_path,
     ], config)
@@ -196,23 +203,37 @@ async def concat_segments(
     """
     将多个视频片段按顺序拼接为完整视频。
     使用 concat 协议（文本列表方式），避免重编码画面质量损失。
+
+    两步走：
+      1. concat -c copy → 临时文件（速度快，但 moov duration 元数据可能不准）
+      2. remux pass → 最终文件（ffmpeg 重扫实际 PTS，写出正确的 duration 元数据）
     """
-    # 创建临时拼接列表文件
     list_path = Path(output_path).parent / "concat_list.txt"
     with open(list_path, "w", encoding="utf-8") as f:
         for seg in segment_paths:
             f.write(f"file '{Path(seg).resolve().as_posix()}'\n")
 
+    # ── Step 1：concat 拼接到临时文件 ────────────────────────────
+    tmp_path = str(Path(output_path).with_suffix(".concat_tmp.mp4"))
     await run_ffmpeg([
         "-f", "concat",
         "-safe", "0",
         "-i", str(list_path),
-        "-c", "copy",        # 直接复制，不重编码
+        "-c", "copy",
+        tmp_path,
+    ], config)
+    list_path.unlink(missing_ok=True)
+
+    # ── Step 2：remux 修正 duration 元数据 ───────────────────────
+    # ffmpeg 重新读取实际 packet PTS，写出正确的 moov duration
+    # 不重编码，仅容器层操作，耗时极短
+    await run_ffmpeg([
+        "-i", tmp_path,
+        "-c", "copy",
+        "-movflags", "+faststart",
         output_path,
     ], config)
-
-    # 清理临时列表文件
-    list_path.unlink(missing_ok=True)
+    Path(tmp_path).unlink(missing_ok=True)
 
 
 async def get_audio_duration(audio_path: str, config: dict) -> float:

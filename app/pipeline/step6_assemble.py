@@ -115,7 +115,8 @@ async def _collect_all_pieces(
             # 超出 max_gap_sec 的部分直接丢弃，让节奏更紧凑
             capped_end = gap_start + min(raw_gap, max_gap_sec)
             gap_path = str(gaps_dir / f"gap_{gap_idx:04d}.mp4")
-            await extract_video_segment(video_path, gap_path, gap_start, capped_end, config)
+            await extract_video_segment(video_path, gap_path, gap_start, capped_end, config,
+                                        mute_audio=True)  # 间隙静音，避免背景音与配音不匹配
             pieces.append(gap_path)
             gap_idx += 1
             if raw_gap > max_gap_sec:
@@ -141,7 +142,8 @@ async def _collect_all_pieces(
     # ── 最后一段语音之后的尾部间隙 ──────────────────────────
     if total_dur - prev_end > 0.05:
         tail_path = str(gaps_dir / f"gap_{gap_idx:04d}_tail.mp4")
-        await extract_video_segment(video_path, tail_path, prev_end, total_dur, config)
+        await extract_video_segment(video_path, tail_path, prev_end, total_dur, config,
+                                    mute_audio=True)  # 尾部间隙同样静音
         pieces.append(tail_path)
         logger.debug(f"  尾部间隙 [{prev_end:.2f}s → {total_dur:.2f}s] 已保留")
 
@@ -314,6 +316,12 @@ def _words_to_srt(segments: list, words: list, min_clause_chars: int = 15) -> st
             n_assign = max(1, round(n_words * ratio))
             assigned = seg_words[word_idx: word_idx + n_assign]
             word_idx = min(word_idx + n_assign, n_words)
+
+            if not assigned:
+                # 词已分配完但还有剩余子句：沿用上一个词的结束时间到 segment 结尾
+                last_end = float(_get(seg_words[-1], 'end', seg_end)) if seg_words else seg_end
+                clauses.append((last_end, seg_end, sub))
+                continue
 
             sub_start = float(_get(assigned[0],  'start', seg_start))
             sub_end   = float(_get(assigned[-1], 'end',   seg_end))
